@@ -4,12 +4,15 @@
 ##http://www.unixmen.com/install-postgresql-9-4-phppgadmin-ubuntu-14-10/
 ##http://www.unixmen.com/postgresql-9-4-released-install-centos-7/
 ##w.if-not-true-then-false.com/2012/install-postgresql-on-fedora-centos-red-hat-rhel/
+
+
+
 function getOSVersion {
   if [ -f "/etc/os-release" ]; then
   	##It is likely Ubuntu
-    osname=`cat /etc/os-release | grep ID= | head -1`
-    osname=${osname:3}
-    osversion=`cat /etc/os-release | grep VERSION_ID= | head -1`
+    osname=`cat /etc/os-release | grep ID= | head -1 | sed 's/\"//g'`
+    osname=${osname:3}                                 
+    osversion=`cat /etc/os-release | grep VERSION_ID= | head -1 |  sed 's/\"//g'`
     osversion=${osversion:11}
     return
   fi
@@ -20,7 +23,7 @@ function getOSVersion {
     if [[ $sysrelease == CentOS* ]]; then        
       ##https://www.centos.org/forums/viewtopic.php?t=488
       osversion=`rpm -q --qf "%{VERSION}" $(rpm -q --whatprovides redhat-release)`
-      osname="centos$osversion"      
+      osname="centos"      
       return
     fi
     ## Fedora
@@ -33,6 +36,19 @@ function getOSVersion {
     echo "Sorry my script only supports CentOS and Ubuntu"
     exit
   fi
+}
+
+# check file /etc/yum.repos.d/CentOS-Base.repo, nếu tồn tại thì sửa file đó 
+function checkFileCentOSBase {
+  # check file 
+ if [ -f "/etc/yum.repos.d/CentOS-Base.repo" ];then
+  sed -i '/.*exclude=postgresql\*.*/d' /etc/yum.repos.d/CentOS-Base.repo
+  sed -i '/\[base\]/a exclude=postgresql\*' /etc/yum.repos.d/CentOS-Base.repo
+  sed -i '/\[updates\]/a exclude=postgresql\*' /etc/yum.repos.d/CentOS-Base.repo
+  return
+ else
+    exit
+ fi
 }
 
 function changePassOfPostgres {
@@ -63,6 +79,30 @@ function getPGVersion {
     echo ${psqlver:18}
   fi 
 }
+
+# checkPGActiveCenOS
+
+function checkPGActiveCenOS6 {
+  pg_active=`service  --status-all| grep postgres | grep running`
+}
+
+function checkPGActiveCenOS7 {
+  pg_active=`systemctl --state=active | grep postgresql`
+}
+
+function checkPGActiveCenOS {
+ case "$osversion" in
+  6)
+   checkPGActiveCenOS6
+    ;;
+  7)
+   checkPGActiveCenOS7
+    ;;
+  *) echo "general content"
+    ;;
+  esac
+}
+
 function checkPGActive {
   case "$osname" in
   ubuntu)
@@ -82,11 +122,8 @@ function checkPGActive {
       pg_active=`echo $pg_status | grep Running | grep main`      
     fi
     ;;
-  centos6)
-    pg_active=`service  --status-all| grep postgres | grep running`
-    ;;
-  centos7)
-    pg_active=`systemctl --state=active | grep postgresql`
+  centos)
+    checkPGActiveCenOS
     ;;
   esac
 
@@ -96,86 +133,135 @@ function checkPGActive {
     echo 1
   fi
 }
+
+# startPostgresCenOS
+
+function startPostgresCenOS6 {
+   pgservice=`service  --status-all| grep postgres`
+    spaceIndex=`expr index "$pgservice" " "`
+    pgservice=${pgservice:0:spaceIndex}
+    service $pgservice start
+}
+function startPostgresCenOS7 {
+   pgservice=`systemctl --state=inactive | grep postgresql`   
+    pgservice=${pgservice/.service*/}
+    systemctl start $pgservice
+}
+
+function startPostgresCenOS {
+case "$osversion" in
+  6)
+   startPostgresCenOS6
+    ;;
+  7)
+   startPostgresCenOS7
+    ;;
+  *) echo "general content"
+    ;;
+  esac
+}
+
 function startPostgres {
   case "$osname" in
   ubuntu)
     service postgresql start
     ;;
-  centos6)
-    pgservice=`service  --status-all| grep postgres`
-    spaceIndex=`expr index "$pgservice" " "`
-    pgservice=${pgservice:0:spaceIndex}
-    service $pgservice start
-    ;;
-  centos7)
-    pgservice=`systemctl --state=inactive | grep postgresql`   
-    pgservice=${pgservice/.service*/}
-    systemctl start $pgservice
+  centos)
+    startPostgresCenOS
     ;;
   esac
 }
+
+
+
 function installPostgreslUbuntu {
     apt-get install postgresql postgresql-client postgresql-contrib libpq-dev
 }
 
+# installPostgreslCentOS
+
+function installPostgreslCentOS6 {
+
+  checkFileCentOSBase 
+
+  os64bit=`uname -m | grep 64`
+  if [ ! -z "$os64bit" ]; then
+    rpm -Uvh http://yum.postgresql.org/9.4/redhat/rhel-6-x86_64/pgdg-centos94-9.4-1.noarch.rpm
+  else
+    rpm -Uvh http://yum.postgresql.org/9.4/redhat/rhel-6-i386/pgdg-centos94-9.4-1.noarch.rpm
+  fi
+  yum update
+  yum -y install postgresql94-server postgresql94-contrib
+  echo "Initialize database for first time use"
+  service postgresql-9.4 initdb
+  
+  chkconfig postgresql-9.4 on
+
+  if [ $(checkPGActive) -eq 1 ]; then
+    echo -e "\e[42mPostgresql is running\e[49m"
+  else
+    service postgresql-9.4 start
+  fi  
+}
+
 function installPostgreslCentOS7 { 
+
+    checkFileCentOSBase
+
+
     if ! rpm -qa | grep pgdg-centos94-9.4-1 
     then
       echo "install pgdg-centos94-9.4-1.noarch.rpm"
       rpm -Uvh http://yum.postgresql.org/9.4/redhat/rhel-7-x86_64/pgdg-centos94-9.4-1.noarch.rpm
     else
-    	echo "pgdg-centos94-9.4-1.noarch.rpm is already installed. Skip"
+      echo "pgdg-centos94-9.4-1.noarch.rpm is already installed. Skip"
     fi
 
     yum update
 
-    if ! yum list installed	| grep postgresql94-server 
+    if ! yum list installed | grep postgresql94-server 
     then
       echo "Install postgresql94-server"
       yum -y install postgresql94-server
     else
-    	echo "postgresql94-server is already installed. Skip"
+      echo "postgresql94-server is already installed. Skip"
     fi
 
-    if ! yum list installed	| grep postgresql94
+    if ! yum list installed | grep postgresql94
     then 
       echo "Install postgresql94"
       yum -y install postgresql94
     else
-    	echo "postgresql94 is already installed. Skip"
+      echo "postgresql94 is already installed. Skip"
     fi
 
-    if ! yum list installed	| grep postgresql94-contrib
+    if ! yum list installed | grep postgresql94-contrib
     then
             echo "Install postgresql94-contrib"
             yum -y install postgresql94-contrib
     else
-    	echo "postgresql94-contrib is already installed. Skip"
+      echo "postgresql94-contrib is already installed. Skip"
     fi
     echo "Initialize database for first time use"
     /usr/pgsql-9.4/bin/postgresql94-setup initdb
 }
 
-function installPostgreslCentOS6 {
-	os64bit=`uname -m | grep 64`
-	if [ ! -z "$os64bit" ]; then
-		rpm -Uvh http://yum.postgresql.org/9.4/redhat/rhel-6-x86_64/pgdg-centos94-9.4-1.noarch.rpm
-	else
-		rpm -Uvh http://yum.postgresql.org/9.4/redhat/rhel-6-i386/pgdg-centos94-9.4-1.noarch.rpm
-	fi
-	yum update
-	yum -y install postgresql94-server postgresql94-contrib
-	echo "Initialize database for first time use"
-	service postgresql-9.4 initdb
-	
-	chkconfig postgresql-9.4 on
-
-	if [ $(checkPGActive) -eq 1 ]; then
-    echo -e "\e[42mPostgresql is running\e[49m"
-  else
-    service postgresql-9.4 start
-  fi	
+function installPostgreslCentOS {
+  echo "$osversion"
+ case "$osversion" in
+  6)
+   installPostgreslCentOS6
+    ;;
+  7)
+   installPostgreslCentOS7
+    ;;
+  *) echo "general content"
+    ;;
+  esac
 }
+
+
+
 # Install Postgresql 9.4.1 on RedHat 19/20/21, CentOS 6, 7
 # http://www.if-not-true-then-false.com/2012/install-postgresql-on-fedora-centos-red-hat-rhel/
 function installPostgresql {
@@ -184,12 +270,9 @@ function installPostgresql {
   ubuntu)
     installPostgreslUbuntu
     ;;
-  centos7)
-    installPostgreslCentOS7
+  centos)
+    installPostgreslCentOS
     ;;
-  centos6)
-		installPostgreslCentOS6
-		;;
   fedora)
     installPostgreslCentOS7
     ;;
