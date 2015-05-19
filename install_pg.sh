@@ -8,37 +8,70 @@
 
 
 function getOSVersion {
-  if [ -f "/etc/os-release" ]; then
-  	##It is likely Ubuntu
-    osname=`cat /etc/os-release | grep ID= | head -1 | sed 's/\"//g'`
-    osname=${osname:3}                                 
-    osversion=`cat /etc/os-release | grep VERSION_ID= | head -1 |  sed 's/\"//g'`
-    osversion=${osversion:11}
-    return
-  fi
 
-  if [ -f "/etc/system-release" ]; then
-    sysrelease=`cat /etc/system-release`
-    ## CentOS
-    if [[ $sysrelease == CentOS* ]]; then        
-      ##https://www.centos.org/forums/viewtopic.php?t=488
-      osversion=`rpm -q --qf "%{VERSION}" $(rpm -q --whatprovides redhat-release)`
-      osname="centos"      
-      return
-    fi
-    ## Fedora
-    if [[ $sysrelease == Fedora* ]]; then
-    	osversion=`rpm -q --qf "%{VERSION}" fedora-release`
-    	osname="fedora$osversion"
-    	return
-    fi
-  else
-    echo "Sorry my script only supports CentOS and Ubuntu"
-    exit
+echo "#####################"
+
+if [ -f "/etc/os-release" ]; then
+    ##Ubuntu, Debian, Lubuntu...
+  osname=`cat /etc/os-release | sed -n 's/^ID=// p'`
+  osversion=`cat /etc/os-release | sed -n -r 's/^VERSION_ID="(.*)"$/\1/ p' | sed 's/\.//g'`
+  if [[ $osname == "fedora" ]]; then
+        osversion=`rpm -q --qf "%{VERSION}" fedora-release`
   fi
+  return 
+fi
+
+if [ -f "/etc/system-release" ]; then
+  sysrelease=`cat /etc/system-release`
+    ## CentOS
+  if [[ $sysrelease == CentOS* ]]; then        
+      ##https://www.centos.org/forums/viewtopic.php?t=488
+    osversion=`rpm -q --qf "%{VERSION}" $(rpm -q --whatprovides redhat-release)`
+    osname="centos"      
+      return
+  fi
+else
+    echo "Sorry my script only supports CentOS, Ubuntu, Debian and Fedora"
+    exit
+fi
+
 }
 
-# check file /etc/yum.repos.d/CentOS-Base.repo, nếu tồn tại thì sửa file đó 
+
+#======================================================
+# return 0 if a command does not exist
+#======================================================
+
+
+function checkIfCommandExist {
+  command -v $1 >/dev/null 2>&1 || {
+  #not found 
+  echo 0
+    return
+  }
+  #found
+  echo 1
+}
+
+#======================================================
+#check file /etc/yum.repos.d in fedora 
+#======================================================
+
+
+function checkFileFedoraRepo {
+  # check file 
+  sed -i '/.*exclude=postgresql\*.*/d' /etc/yum.repos.d/fedora.repo
+  sed -i '/\[fedora\]/a exclude=postgresql\*' /etc/yum.repos.d/fedora.repo
+
+  sed -i '/.*exclude=postgresql\*.*/d' /etc/yum.repos.d/fedora-updates.repo
+  sed -i '/\[updates\]/a exclude=postgresql\*' /etc/yum.repos.d/fedora-updates.repo
+}
+
+
+#======================================================
+# check file /etc/yum.repos.d/CentOS-Base.repo and edit
+#======================================================
+
 function checkFileCentOSBase {
   # check file 
  if [ -f "/etc/yum.repos.d/CentOS-Base.repo" ];then
@@ -51,6 +84,8 @@ function checkFileCentOSBase {
  fi
 }
 
+
+
 function changePassOfPostgres {
   echo -e  "\e[41mYou are required to change password of postgres user\e[49m"
   passwd postgres
@@ -58,8 +93,9 @@ function changePassOfPostgres {
 }
 
 function getPGConfigPath {
-  hbaconf=`sudo -u postgres -H -- psql -c "SHOW hba_file;" | grep pg_hba.conf`
-  echo $hbaconf
+
+   hbaconf=`sudo -u postgres -H -- psql -c "SHOW hba_file;" | grep pg_hba.conf`
+   echo $hbaconf
 }
 # Return 0 if psql is not found
 function checkPGInstalled {
@@ -80,32 +116,13 @@ function getPGVersion {
   fi 
 }
 
-# checkPGActiveCenOS
 
-function checkPGActiveCenOS6 {
-  pg_active=`service  --status-all| grep postgres | grep running`
-}
+#======================================================
+#     Check PGActive Ubuntu
+#======================================================
 
-function checkPGActiveCenOS7 {
-  pg_active=`systemctl --state=active | grep postgresql`
-}
 
-function checkPGActiveCenOS {
- case "$osversion" in
-  6)
-   checkPGActiveCenOS6
-    ;;
-  7)
-   checkPGActiveCenOS7
-    ;;
-  *) echo "general content"
-    ;;
-  esac
-}
-
-function checkPGActive {
-  case "$osname" in
-  ubuntu)
+function checkPGActiveUbuntu1204 {
     pg_status=`service postgresql status`
 
     pg_dead=`echo $pg_status | grep dead` #check if postgresql service is dead in new Ubuntu
@@ -121,9 +138,123 @@ function checkPGActive {
       #Check Ubuntu 12.x
       pg_active=`echo $pg_status | grep Running | grep main`      
     fi
+}
+
+
+function checkPGActiveUbuntu {
+  case "$osversion" in
+    1204)
+      checkPGActiveUbuntu1204
+    ;;
+    1504)
+      checkPGActiveUbuntu1204
+    ;;
+    *)
+      echo "general content"
+    ;;
+  esac
+}
+
+
+#======================================================
+#     Check PGActive CenOS
+#======================================================
+
+function checkPGActiveCenOS6 {
+  pg_active=`service  --status-all| grep postgres | grep running`
+}
+
+function checkPGActiveCenOS7 {
+  pg_active=`systemctl --state=active | grep postgresql`
+}
+
+function checkPGActiveCenOS {
+ case "$osversion" in
+  6)
+   checkPGActiveCenOS6
+  ;;
+  7)
+   checkPGActiveCenOS7
+  ;;
+  *) 
+    echo "general content"
+  ;;
+  esac
+}
+
+
+#======================================================
+#     Check PGActive Fedora
+#======================================================
+
+function checkPGActiveFedora21 {
+   pg_active=`service  --status-all| grep postgres | grep running`
+}
+
+function checkPGActiveFedora {
+    echo "check PGActive Fedpra $osversion"
+    case "$osversion" in
+      21)
+        checkPGActiveFedora21
+      ;;
+      *)
+        echo  "general content"
+      ;;
+    esac
+}
+
+
+#======================================================
+#     Check PGActive 
+#======================================================
+
+function checkPGActiveDebian8 {
+    pg_status=`service postgresql status`
+
+    pg_dead=`echo $pg_status | grep dead` #check if postgresql service is dead in new Ubuntu
+
+    if [ ! -z "$pg_dead" ]; then
+      echo 0 #postgresql service stops
+      return
+    fi
+
+    pg_active=`echo $pg_status | grep exited` #check if postgresql service is running
+
+    if [ -z "$pg_active" ]; then
+      #Check Ubuntu 12.x
+      pg_active=`echo $pg_status | grep Running | grep main`      
+    fi
+}
+
+function checkPGActiveDebian {
+  
+  case "$osversion" in
+  8)
+   checkPGActiveCenOS6
+  ;;
+  *) 
+    echo "general content"
+  ;;
+  esac
+}
+
+#======================================================
+#     Check PGActive 
+#======================================================
+
+function checkPGActive {
+  case "$osname" in
+  ubuntu)
+    checkPGActiveUbuntu
     ;;
   centos)
     checkPGActiveCenOS
+    ;;
+  fedora)
+    checkPGActiveFedora
+    ;;
+  debian)
+    checkPGActiveDebian
     ;;
   esac
 
@@ -134,7 +265,10 @@ function checkPGActive {
   fi
 }
 
-# startPostgresCenOS
+
+#======================================================
+# Start postgrest Centos 
+#======================================================
 
 function startPostgresCenOS6 {
    pgservice=`service  --status-all| grep postgres`
@@ -161,6 +295,10 @@ case "$osversion" in
   esac
 }
 
+#======================================================
+# Start postgrest 
+#======================================================
+
 function startPostgres {
   case "$osname" in
   ubuntu)
@@ -173,12 +311,58 @@ function startPostgres {
 }
 
 
+#======================================================
+# Intsall postgrest in Ubuntu
+#======================================================
 
-function installPostgreslUbuntu {
-    apt-get install postgresql postgresql-client postgresql-contrib libpq-dev
+
+function installPostgreslUbuntu1204 {
+  echo "----$osversion----"
+
+  sudo apt-get update
+  sudo apt-get install postgresql
+
+  if [ $(checkPGActive) -eq 1 ]; then
+    echo -e "\e[42mPostgresql is running\e[49m"
+  else
+    service postgresql-9.4 start
+  fi  
 }
 
-# installPostgreslCentOS
+function installPostgreslUbuntu1504 {
+echo "$osversion"
+
+sudo apt-get update
+sudo apt-get install postgresql postgresql-contrib
+
+if [ $(checkPGActive) -eq 1 ]; then
+    echo -e "\e[42mPostgresql is running\e[49m"
+  else
+    service postgresql-9.4 start
+  fi  
+}
+
+function installPostgreslUbuntu {
+
+  echo "$osversion"
+
+  case "$osversion" in
+    1204)
+      installPostgreslUbuntu1204
+    ;;
+    1504)
+      installPostgreslUbuntu1504
+    ;;
+    *)
+      installPostgreslUbuntu1204
+      echo "general content"
+    ;;
+  esac
+}
+
+#======================================================
+# Intsall postgrest in CentOS
+#======================================================
 
 function installPostgreslCentOS6 {
 
@@ -207,7 +391,6 @@ function installPostgreslCentOS6 {
 function installPostgreslCentOS7 { 
 
     checkFileCentOSBase
-
 
     if ! rpm -qa | grep pgdg-centos94-9.4-1 
     then
@@ -255,15 +438,86 @@ function installPostgreslCentOS {
   7)
    installPostgreslCentOS7
     ;;
-  *) echo "general content"
+  *) 
+    echo "general content"
+    ;;
+  esac
+}
+
+#======================================================
+# Intsall postgrest in Fedora 
+#======================================================
+
+function installPostgreslFedora21 {
+
+  echo "-----$osversion-----"
+
+  checkFileFedoraRepo
+
+
+
+  # os64bit=`uname -m | grep 64`
+  # if [ ! -z "$os64bit" ]; then
+  #   rpm -Uvh http://yum.postgresql.org/9.4/fedora/fedora-21-x86_64/pgdg-fedora94-9.4-2.noarch.rpm
+  # else
+  #   rpm -Uvh http://yum.postgresql.org/9.4/fedora/fedora-21-x86_64/pgdg-fedora94-9.4-2.noarch.rpm
+  # fi
+    rpm -Uvh http://yum.postgresql.org/9.4/fedora/fedora-21-x86_64/pgdg-fedora94-9.4-2.noarch.rpm
+    yum update
+    yum -y install postgresql94-server postgresql94-contrib
+    echo "Initialize database for first time use"
+    
+
+}
+
+function installPostgreslFedora {
+  echo "+++++++$osversion +++++++"
+  case "$osversion" in
+  21)
+    installPostgreslFedora21
+    ;;
+  *) 
+    echo "general content"
     ;;
   esac
 }
 
 
+#======================================================
+# Intsall postgrest in Debian
+#======================================================
+
+
+function installPostgreslDebian8 {
+    printf "deb http://apt.postgresql.org/pub/repos/apt/ wheezy-pgdg main
+            # test check " > /etc/apt/sources.list.d/pgdg.list
+
+  if [ $(checkIfCommandExist wget) -eq 0 ]; then
+      install curl
+  fi
+    wget https://www.postgresql.org/media/keys/ACCC4CF8.asc
+    apt-key add ACCC4CF8.asc
+    apt-get update
+    apt-get install postgresql
+
+    echo "----successful----"
+}
+
+function installPostgreslDebian {
+   echo "^^^^^^^^^$osversion^^^^^^^"
+  case "$osversion" in
+  8)
+    installPostgreslDebian8
+    ;;
+  *) 
+    echo "general content"
+    ;;
+  esac
+}
 
 # Install Postgresql 9.4.1 on RedHat 19/20/21, CentOS 6, 7
 # http://www.if-not-true-then-false.com/2012/install-postgresql-on-fedora-centos-red-hat-rhel/
+
 function installPostgresql {
   echo "Install Postgresql on $osname $osversion"
   case "$osname" in
@@ -274,24 +528,35 @@ function installPostgresql {
     installPostgreslCentOS
     ;;
   fedora)
-    installPostgreslCentOS7
+    installPostgreslFedora
+    ;;
+  debian)
+    installPostgreslDebian
     ;;
   esac
 }
+
+
+
 
 function cleanDataCentOS {
     echo "Destructive remove all existing data in /var/lib/pgsql/9.4/data/"
     rm -rf /var/lib/pgsql/9.4/data/
 }
 
-##---------------
+
+
+#======================================================
 ## Make sure user runs this bash script as root
+#======================================================
+
 if [ $(id -u) -ne 0 ]; then
    echo -e  "\e[41mMust run as root user\e[49m"
    exit
 fi
 
 getOSVersion
+
 echo $osname
 
 if [ $(checkPGInstalled) -eq 1 ]; then
@@ -326,4 +591,6 @@ fi
 
 #
 #changePassOfPostgres
+
+
 getPGConfigPath
