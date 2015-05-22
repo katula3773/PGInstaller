@@ -9,11 +9,10 @@
 
 function getOSVersion {
 
-echo "#####################"
 
 if [ -f "/etc/os-release" ]; then
     ##Ubuntu, Debian, Lubuntu...
-  osname=`cat /etc/os-release | sed -n 's/^ID=// p'`
+  osname=`cat /etc/os-release | sed -n 's/^ID=// p'| sed 's/\"//g'`
   osversion=`cat /etc/os-release | sed -n -r 's/^VERSION_ID="(.*)"$/\1/ p' | sed 's/\.//g'`
   if [[ $osname == "fedora" ]]; then
         osversion=`rpm -q --qf "%{VERSION}" fedora-release`
@@ -271,13 +270,13 @@ function checkPGActive {
 #======================================================
 
 function startPostgresCenOS6 {
-   pgservice=`service  --status-all| grep postgres`
+    pgservice=`service  --status-all| grep postgres`
     spaceIndex=`expr index "$pgservice" " "`
     pgservice=${pgservice:0:spaceIndex}
     service $pgservice start
 }
 function startPostgresCenOS7 {
-   pgservice=`systemctl --state=inactive | grep postgresql`   
+    pgservice=`systemctl --state=inactive | grep postgresql`
     pgservice=${pgservice/.service*/}
     systemctl start $pgservice
 }
@@ -354,7 +353,7 @@ function installPostgreslUbuntu {
       installPostgreslUbuntu1504
     ;;
     *)
-      installPostgreslUbuntu1204
+      installPostgreslUbuntu1504
       echo "general content"
     ;;
   esac
@@ -489,8 +488,7 @@ function installPostgreslFedora {
 
 
 function installPostgreslDebian8 {
-    printf "deb http://apt.postgresql.org/pub/repos/apt/ wheezy-pgdg main
-            # test check " > /etc/apt/sources.list.d/pgdg.list
+    printf "deb http://apt.postgresql.org/pub/repos/apt/ wheezy-pgdg main " > /etc/apt/sources.list.d/pgdg.list
 
   if [ $(checkIfCommandExist wget) -eq 0 ]; then
       install curl
